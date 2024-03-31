@@ -1,0 +1,9 @@
+{
+    "recommendations": [
+        "alexcvzz.vscode-sqlite",
+        "ms-python.autopep8",
+        "ms-python.isort",
+        "ms-python.debugpy",
+        "ms-python.python"
+    ]
+}

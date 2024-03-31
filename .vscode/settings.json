@@ -1,0 +1,18 @@
+{
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.typeCheckingMode": "standard",
+    "autopep8.args": [
+        "--max-line-length=100"
+    ],
+    "isort.args": [
+        "--line-width=100"
+    ],
+    "editor.rulers": [
+        100
+    ],
+    "[python]": {
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    },
+}
