@@ -126,7 +126,10 @@ def main():
                   ' VALUES'
                   ' ("{id}", "{user_id}", "{item_id}", "media_file", 1, "{loved_date}")')
 
+    imported_count = 0
+    loved_tracks_count = 0
     for track in loved_tracks:
+        loved_tracks_count += 1
         loved_date = datetime.fromtimestamp(int(track.get("date", {}).get("uts", 0)),
                                             tz=ZoneInfo(args.tz) if args.tz else timezone.utc)
         artist = track.get("artist", {}).get("name")
@@ -140,6 +143,7 @@ def main():
             continue
 
         logger.info('Importing "%s" by "%s"', track_name, artist)
+        imported_count += 1
         db_cursor.execute(output_sql.format(
             id=uuid.uuid4(),
             user_id=user_id,
@@ -149,6 +153,7 @@ def main():
             loved_date=loved_date))
         db_con.commit()
 
+    logger.info('Imported %s out of %s tracks', imported_count, loved_tracks_count)
     db_con.close()
 
 
