@@ -42,21 +42,22 @@ def try_get_track_play_count_date(db_cursor: sqlite3.Cursor, track_id: str):
 def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id: str):
     def search_in_path(artist: str, name: str):
         query = ('SELECT mf.id, mf.artist, mf.title FROM media_file mf'
-                 ' WHERE (mf.path LIKE :artist) AND (mf.path LIKE :name)')
+                 ' WHERE (LOWER(mf.path) LIKE :artist) AND (LOWER(mf.path) LIKE :name)')
         if not "remix" in name.lower():
-            query += ' AND (NOT (UPPER(mf.path) LIKE "%REMIX%")))'
-        return (query, {"artist": f'%{artist}%', "name": f'%{name}%'})
+            query += ' AND (NOT (LOWER(mf.path) LIKE "%remix%"))'
+        return (query, {"artist": f'%{artist.lower()}%', "name": f'%{name.lower()}%'})
 
     def search_several_artists(artist: str, name: str):
         if not "," in artist:
             return None
-        first_artist = artist.split(",")[0]
+        first_artist = artist.split(",")[0].lower()
+        name = name.lower()
         return (('SELECT mf.id, mf.artist, mf.title FROM media_file mf WHERE ('
-                 '(mf.artist = :first_artist)'
+                 '(LOWER(mf.artist) = :first_artist)'
                  ') AND ('
-                 '(mf.title = :name) OR (mf.title LIKE :name_feat)'
-                 ' OR (mf.title LIKE :name_featuring) OR (mf.title LIKE :name_ft)'
-                 ' OR (mf.title LIKE :name_w)'
+                 '(LOWER(mf.title) = :name) OR (LOWER(mf.title) LIKE :name_feat)'
+                 ' OR (LOWER(mf.title) LIKE :name_featuring) OR (LOWER(mf.title) LIKE :name_ft)'
+                 ' OR (LOWER(mf.title) LIKE :name_w)'
                  ')'),
                 {"first_artist": first_artist,
                     "name": name,
@@ -69,9 +70,9 @@ def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id
         delimiters = re.compile(r"(?:[\&\,]| x |ft|feat(?:uring)?| w\/ )", flags=re.IGNORECASE)
         if not delimiters.search(artist + " - " + name):
             return None
-        key_words = [x.strip().strip("()") for x in delimiters.split(artist + "," + name)]
+        key_words = [x.strip().strip("()[]").lower() for x in delimiters.split(artist + "," + name)]
         template = ('SELECT mf.id, mf.artist, mf.title,'
-                    ' mf.artist || " " || mf.title as SearchString'
+                    ' LOWER(mf.artist || " " || mf.title) as SearchString'
                     ' FROM media_file mf WHERE ({condition})')
         result_query = template.format(condition=") AND (".join(
             f'SearchString LIKE ?' for _ in range(len(key_words))
@@ -83,8 +84,8 @@ def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id
             ' FROM media_file mf WHERE mf.mbz_recording_id = :mbz_track_id',
             {"mbz_track_id": mbz_track_id if mbz_track_id else "None"}),
         ('SELECT mf.id, mf.artist, mf.title'
-            ' FROM media_file mf WHERE (mf.artist = :artist) AND (mf.title = :name)',
-            {"artist": artist, "name": name}),
+            ' FROM media_file mf WHERE (LOWER(mf.artist) = :artist) AND (LOWER(mf.title) = :name)',
+            {"artist": artist.lower(), "name": name.lower()}),
         search_in_path(artist, name),
         search_several_artists(artist, name),
         search_several_artists_regex(artist, name),
