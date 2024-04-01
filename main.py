@@ -42,16 +42,34 @@ def try_get_track_play_count_date(db_cursor: sqlite3.Cursor, track_id: str):
 
 def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id: str):
     def search_in_path(artist: str, name: str):
+        def sanitized(name: str, replace: str):
+            for c in r'\/:*?"<>|':
+                name = name.replace(c, replace)
+            return name
+
+        name = name.lower()
+        artist = artist.lower()
         query = ('SELECT mf.id, mf.artist, mf.title FROM media_file mf'
-                 ' WHERE (LOWER(mf.path) LIKE :artist) AND (LOWER(mf.path) LIKE :name)')
-        if not "mix" in name.lower():
+                 ' WHERE (LOWER(mf.path) LIKE :artist) AND ('
+                 ' (LOWER(mf.path) LIKE :name)'
+                 ' OR (LOWER(mf.path) LIKE :name_sanitized_1)'
+                 ' OR (LOWER(mf.path) LIKE :name_sanitized_2)'
+                 ')')
+        if not "mix" in name:
             query += (' AND (NOT ('
                       '(LOWER(mf.path) LIKE "%(mix by %")'
                       ' OR (LOWER(mf.path) LIKE "%(remix by %")'
                       ' OR (LOWER(mf.path) LIKE "% remix)%")'
                       ' OR (LOWER(mf.path) LIKE "% mix)%")'
                       '))')
-        return (query, {"artist": f'%{artist.lower()}%', "name": f'%{name.lower()}%'})
+        if not "live" in name:
+            query += (' AND (NOT LOWER(mf.path) LIKE "%(%live%)%")')
+        return (query, {
+            "artist": f'%{artist}%',
+            "name": f'%{name}%',
+            "name_sanitized_1": f'%{sanitized(name, "_")}%',
+            "name_sanitized_2": f'%{sanitized(name, "")}%',
+            })
 
     def search_several_artists(artist: str, name: str):
         if not "," in artist:
