@@ -44,8 +44,13 @@ def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id
     def search_in_path(artist: str, name: str):
         query = ('SELECT mf.id, mf.artist, mf.title FROM media_file mf'
                  ' WHERE (LOWER(mf.path) LIKE :artist) AND (LOWER(mf.path) LIKE :name)')
-        if not "remix" in name.lower():
-            query += ' AND (NOT (LOWER(mf.path) LIKE "%remix%"))'
+        if not "mix" in name.lower():
+            query += (' AND (NOT ('
+                      '(LOWER(mf.path) LIKE "%(mix by %")'
+                      ' OR (LOWER(mf.path) LIKE "%(remix by %")'
+                      ' OR (LOWER(mf.path) LIKE "% remix)%")'
+                      ' OR (LOWER(mf.path) LIKE "% mix)%")'
+                      '))')
         return (query, {"artist": f'%{artist.lower()}%', "name": f'%{name.lower()}%'})
 
     def search_several_artists(artist: str, name: str):
