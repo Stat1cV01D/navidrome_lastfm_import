@@ -78,10 +78,10 @@ def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id
             return None
         key_words = [x.strip().strip("()[]").lower() for x in delimiters.split(artist + "," + name)]
         template = ('SELECT mf.id, mf.artist, mf.title,'
-                    ' LOWER(mf.artist || " " || mf.title) as SearchString'
+                    ' LOWER(mf.artist || " " || mf.title) as search_string'
                     ' FROM media_file mf WHERE ({condition})')
         result_query = template.format(condition=") AND (".join(
-            f'SearchString LIKE ?' for _ in range(len(key_words))
+            f'search_string LIKE ?' for _ in range(len(key_words))
         ))
         return (result_query, [f"%{x}%" for x in key_words])
 
@@ -98,14 +98,14 @@ def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id
     ]
 
     try:
-        for id, query in enumerate(queries):
+        for n, query in enumerate(queries):
             if not query:
                 continue
             result = db_cursor.execute(*query)
             fetch = result.fetchone()
             if fetch is not None:
                 logger.debug('Found (attempt #%s) ["%s" by "%s"] as ["%s" by "%s"]',
-                             id+1, name, artist, fetch[2], fetch[1])
+                             n+1, name, artist, fetch[2], fetch[1])
                 return fetch[0]
     except sqlite3.OperationalError as e:
         logger.error('Error finding ["%s" by "%s"]: %s', name, artist, str(e))
