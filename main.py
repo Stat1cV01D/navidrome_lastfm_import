@@ -1,9 +1,10 @@
 import json
 import logging
+import re
 import sqlite3
 import uuid
 from argparse import ArgumentParser
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -12,7 +13,8 @@ from zoneinfo import ZoneInfo
 
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(format='%(levelname)s: %(message)s', encoding='utf-8', level=logging.INFO)
+logging.basicConfig(format='%(levelname)s: %(message)s', filename="output.log",
+                    encoding='utf-8', level=logging.DEBUG)
 
 
 def open_loved_tracks(file_path: Path):
@@ -30,16 +32,77 @@ def get_user_id(db_cursor: sqlite3.Cursor, user_name: str):
     return result.fetchone()[0]
 
 
+def try_get_track_play_count_date(db_cursor: sqlite3.Cursor, track_id: str):
+    result = db_cursor.execute(f'SELECT a.play_count, a.play_date FROM annotation a'
+                               ' WHERE (a.item_id=:track_id) AND (a.item_type="media_file")',
+                               {"track_id": track_id})
+    return result.fetchone()
+
+
 def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id: str):
-    for query in [
-        f'SELECT mf.id FROM media_file mf WHERE mf.mbz_release_track_id = "{mbz_track_id}"',
-        f'SELECT mf.id FROM media_file mf WHERE (mf.artist= "{artist}") AND (mf.title = "{name}")',
-        f'SELECT mf.id FROM media_file mf WHERE (mf.path LIKE "%{artist}%") AND (mf.path LIKE "%{name}%")',
-    ]:
-        result = db_cursor.execute(query)
-        fetch = result.fetchone()
-        if fetch is not None:
-            return fetch[0]
+    def search_in_path(artist: str, name: str):
+        query = ('SELECT mf.id, mf.artist, mf.title FROM media_file mf'
+                 ' WHERE (mf.path LIKE :artist) AND (mf.path LIKE :name)')
+        if not "remix" in name.lower():
+            query += ' AND (NOT (UPPER(mf.path) LIKE "%REMIX%")))'
+        return (query, {"artist": f'%{artist}%', "name": f'%{name}%'})
+
+    def search_several_artists(artist: str, name: str):
+        if not "," in artist:
+            return None
+        first_artist = artist.split(",")[0]
+        return (('SELECT mf.id, mf.artist, mf.title FROM media_file mf WHERE ('
+                 '(mf.artist = :first_artist)'
+                 ') AND ('
+                 '(mf.title = :name) OR (mf.title LIKE :name_feat)'
+                 ' OR (mf.title LIKE :name_featuring) OR (mf.title LIKE :name_ft)'
+                 ' OR (mf.title LIKE :name_w)'
+                 ')'),
+                {"first_artist": first_artist,
+                    "name": name,
+                    "name_feat": f'{name}%feat%',
+                    "name_featuring": f'{name}%featuring%',
+                    "name_ft": f'{name}%ft%',
+                    "name_w": f'{name}%w/%'})
+
+    def search_several_artists_regex(artist: str, name: str):
+        delimiters = re.compile(r"(?:[\&\,]| x |ft|feat(?:uring)?| w\/ )", flags=re.IGNORECASE)
+        if not delimiters.search(artist + " - " + name):
+            return None
+        key_words = [x.strip().strip("()") for x in delimiters.split(artist + "," + name)]
+        template = ('SELECT mf.id, mf.artist, mf.title,'
+                    ' mf.artist || " " || mf.title as SearchString'
+                    ' FROM media_file mf WHERE ({condition})')
+        result_query = template.format(condition=") AND (".join(
+            f'SearchString LIKE ?' for _ in range(len(key_words))
+        ))
+        return (result_query, [f"%{x}%" for x in key_words])
+
+    queries: list = [
+        ('SELECT mf.id, mf.artist, mf.title'
+            ' FROM media_file mf WHERE mf.mbz_recording_id = :mbz_track_id',
+            {"mbz_track_id": mbz_track_id if mbz_track_id else "None"}),
+        ('SELECT mf.id, mf.artist, mf.title'
+            ' FROM media_file mf WHERE (mf.artist = :artist) AND (mf.title = :name)',
+            {"artist": artist, "name": name}),
+        search_in_path(artist, name),
+        search_several_artists(artist, name),
+        search_several_artists_regex(artist, name),
+    ]
+
+    try:
+        for id, query in enumerate(queries):
+            if not query:
+                continue
+            result = db_cursor.execute(*query)
+            fetch = result.fetchone()
+            if fetch is not None:
+                logger.debug('Found (attempt #%s) ["%s" by "%s"] as ["%s" by "%s"]',
+                             id+1, name, artist, fetch[2], fetch[1])
+                return fetch[0]
+    except sqlite3.OperationalError as e:
+        logger.error('Error finding ["%s" by "%s"]: %s', name, artist, str(e))
+
     return None
 
 
@@ -56,12 +119,6 @@ def main():
     user_id = get_user_id(db_cursor, args.name)
     loved_tracks = open_loved_tracks(Path(args.tracks_file))
 
-    # output_sql = ('INSERT INTO'
-    #               ' annotation'
-    #               ' (user_id, item_id, item_type, play_count, play_date, rating, starred, starred_at)'
-    #               ' VALUES'
-    #               ' ({user_id}, {item_id}, "media_file", {number_of_plays}, {last_played_date}, 0, 1, {loved_date})')
-
     output_sql = ('INSERT OR REPLACE INTO'
                   ' annotation'
                   ' (ann_id, user_id, item_id, item_type, starred, starred_at)'
@@ -70,8 +127,7 @@ def main():
 
     for track in loved_tracks:
         loved_date = datetime.fromtimestamp(int(track.get("date", {}).get("uts", 0)),
-                                            **{"tz": ZoneInfo(args.tz)} if args.tz else {})
-
+                                            tz=ZoneInfo(args.tz) if args.tz else timezone.utc)
         artist = track.get("artist", {}).get("name")
         track_name = track.get("name")
         track_id = get_track_id(db_cursor,
@@ -82,16 +138,14 @@ def main():
             logger.warning('"%s" by "%s" was not found in Navidrome DB', track_name, artist)
             continue
 
-        r = output_sql.format(
+        logger.info('Importing "%s" by "%s"', track_name, artist)
+        db_cursor.execute(output_sql.format(
             id=uuid.uuid4(),
             user_id=user_id,
             item_id=track_id,
             number_of_plays=0,
             last_played_date=0,
-            loved_date=loved_date)
-
-        logger.info('Importing "%s" by "%s"', track_name, artist)
-        db_cursor.execute(r)
+            loved_date=loved_date))
         db_con.commit()
 
     db_con.close()
