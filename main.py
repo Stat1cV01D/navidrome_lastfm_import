@@ -6,7 +6,6 @@ import uuid
 from argparse import ArgumentParser
 from datetime import datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 # Uses https://mainstream.ghan.nl/export.html
 # as a primary source of data
@@ -114,7 +113,6 @@ def main():
     parser.add_argument("--tracks-file", type=str, help="JSON with loved tracks")
     parser.add_argument("--db", type=str, help="path to navidrome.db")
     parser.add_argument("--name", type=str, help="Navidrome user name")
-    parser.add_argument("--tz", type=str, required=False, help="Timezone")
     args = parser.parse_args()
 
     db_con = sqlite3.connect(args.db)
@@ -133,7 +131,7 @@ def main():
     for track in loved_tracks:
         loved_tracks_count += 1
         loved_date = datetime.fromtimestamp(int(track.get("date", {}).get("uts", 0)),
-                                            tz=ZoneInfo(args.tz) if args.tz else timezone.utc)
+                                            tz=timezone.utc)
         artist = track.get("artist", {}).get("name")
         track_name = track.get("name")
         track_id = get_track_id(db_cursor,
