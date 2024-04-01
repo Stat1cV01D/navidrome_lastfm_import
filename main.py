@@ -28,7 +28,9 @@ def open_loved_tracks(file_path: Path):
 
 def get_user_id(db_cursor: sqlite3.Cursor, user_name: str):
     result = db_cursor.execute(
-        f'SELECT u.id FROM user u WHERE u.name="{user_name}"')
+        'SELECT u.id FROM user u WHERE u.name = ?', [user_name])
+    if result is None:
+        logger.critical("User %s was not found in Naviddrome DB", user_name)
     return result.fetchone()[0]
 
 
