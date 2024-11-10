@@ -157,6 +157,10 @@ def main():
                                             tz=timezone.utc)
         artist = track.get("artist", {}).get("name")
         track_name = track.get("name")
+        if artist is None or track_name is None:
+            logger.warning('"%s" by "%s" is an invalid entry', track_name, artist)
+            continue
+
         track_id = get_track_id(db_cursor,
                                 artist=artist,
                                 name=track_name,
