@@ -16,7 +16,7 @@ logging.basicConfig(format='%(levelname)s: %(message)s', filename="output.log",
                     encoding='utf-8', level=logging.DEBUG)
 
 
-def open_loved_tracks(file_path: Path):
+def open_tracks(file_path: Path):
     with open(file_path, encoding='utf-8') as f:
         json_out = json.load(f)
         for page in json_out:
@@ -28,9 +28,11 @@ def open_loved_tracks(file_path: Path):
 def get_user_id(db_cursor: sqlite3.Cursor, user_name: str):
     result = db_cursor.execute(
         'SELECT u.id FROM user u WHERE u.name = ?', [user_name])
-    if result is None:
+    row = result.fetchone()
+    if not row:
         logger.critical("User %s was not found in Naviddrome DB", user_name)
-    return result.fetchone()[0]
+        return None
+    return row[0]
 
 
 def try_get_track_play_count_date(db_cursor: sqlite3.Cursor, track_id: str):
@@ -69,7 +71,7 @@ def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id
             "name": f'%{name}%',
             "name_sanitized_1": f'%{sanitized(name, "_")}%',
             "name_sanitized_2": f'%{sanitized(name, "")}%',
-            })
+        })
 
     def search_several_artists(artist: str, name: str):
         if not "," in artist:
@@ -132,8 +134,9 @@ def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id
 
 
 def main():
-    parser = ArgumentParser(description="Last.FM loved tracks importer")
-    parser.add_argument("--tracks-file", type=str, help="JSON with loved tracks")
+    parser = ArgumentParser(description="Last.FM loved and scrobbled tracks importer")
+    parser.add_argument("--loved-tracks-file", type=str, help="JSON with loved tracks")
+    parser.add_argument("--scrobbled-tracks-file", type=str, help="JSON with scrobbled tracks")
     parser.add_argument("--db", type=str, help="path to navidrome.db")
     parser.add_argument("--name", type=str, help="Navidrome user name")
     args = parser.parse_args()
@@ -141,46 +144,94 @@ def main():
     db_con = sqlite3.connect(args.db)
     db_cursor = db_con.cursor()
     user_id = get_user_id(db_cursor, args.name)
-    loved_tracks = open_loved_tracks(Path(args.tracks_file))
+    if not user_id:
+        logger.error("Failed to retrieve user ID. Exiting.")
+        return
 
-    output_sql = ('INSERT OR REPLACE INTO'
-                  ' annotation'
-                  ' (ann_id, user_id, item_id, item_type, starred, starred_at)'
-                  ' VALUES'
-                  ' ("{id}", "{user_id}", "{item_id}", "media_file", 1, "{loved_date}")')
+    loved_tracks = open_tracks(Path(args.loved_tracks_file))
+    scrobbled_tracks = open_tracks(Path(args.scrobbled_tracks_file))
+
+    # Dictionary to hold track data by track ID
+    tracks_data = {}
+
+    imported_count = 0
+    scrobbled_tracks_count = 0
+    for track in scrobbled_tracks:
+        scrobbled_tracks_count += 1
+        artist = track.get("artist", {}).get("#text")
+        track_name = track.get("name")
+        mbz_track_id = track.get("mbid")
+        play_date = datetime.fromtimestamp(int(track.get("date", {}).get("uts")), tz=timezone.utc)
+
+        if not artist or not track_name:
+            logger.warning('"%s" by "%s" is an invalid entry', track_name, artist)
+            continue
+
+        track_id = get_track_id(db_cursor, artist, track_name, mbz_track_id)
+        if not track_id:
+            logger.warning('"%s" by "%s" was not found in Navidrome DB', track_name, artist)
+            continue
+
+        imported_count += 1
+        if track_id not in tracks_data:
+            tracks_data[track_id] = {'play_count': 0, 'latest_play_date': None}
+
+        tracks_data[track_id]['play_count'] += 1
+        if not tracks_data[track_id]['latest_play_date'] or tracks_data[track_id]['latest_play_date'] < play_date:
+            tracks_data[track_id]['latest_play_date'] = play_date
+
+    logger.info('Processed %s out of %s scrobbles', imported_count, scrobbled_tracks_count)
 
     imported_count = 0
     loved_tracks_count = 0
     for track in loved_tracks:
         loved_tracks_count += 1
-        loved_date = datetime.fromtimestamp(int(track.get("date", {}).get("uts", 0)),
-                                            tz=timezone.utc)
-        artist = track.get("artist", {}).get("name")
+        artist = track.get("artist", {}).get("name") or track.get("artist", {}).get("#text")
         track_name = track.get("name")
-        if artist is None or track_name is None:
+        mbz_track_id = track.get("mbid")
+
+        if not artist or not track_name:
             logger.warning('"%s" by "%s" is an invalid entry', track_name, artist)
             continue
 
-        track_id = get_track_id(db_cursor,
-                                artist=artist,
-                                name=track_name,
-                                mbz_track_id=track.get("mbid"))
-        if track_id is None:
+        track_id = get_track_id(db_cursor, artist, track_name, mbz_track_id)
+        if not track_id:
             logger.warning('"%s" by "%s" was not found in Navidrome DB', track_name, artist)
             continue
 
-        logger.info('Importing "%s" by "%s"', track_name, artist)
         imported_count += 1
+        loved_date = datetime.fromtimestamp(int(track.get("date", {}).get("uts")), tz=timezone.utc)
+
+        if track_id not in tracks_data:
+            tracks_data[track_id] = {'play_count': 0, 'latest_play_date': None}
+
+        tracks_data[track_id]['starred'] = True
+        tracks_data[track_id]['starred_at'] = loved_date
+
+    logger.info('Processed %s out of %s loved tracks', imported_count, loved_tracks_count)
+
+    output_sql = (
+        'INSERT OR REPLACE INTO'
+        ' annotation'
+        ' (ann_id, user_id, item_id, item_type, starred, starred_at, play_count, play_date)'
+        ' VALUES'
+        ' ("{id}", "{user_id}", "{item_id}", "media_file", {starred}, "{starred_at}", {play_count}, "{play_date}")'
+    )
+
+    for track_id, data in tracks_data.items():
+        logger.info('Importing track with ID %s', track_id)
         db_cursor.execute(output_sql.format(
             id=uuid.uuid4(),
             user_id=user_id,
             item_id=track_id,
-            number_of_plays=0,
-            last_played_date=0,
-            loved_date=loved_date))
+            starred=1 if data.get('starred') else 0,
+            starred_at=data.get('starred_at', datetime.min.replace(tzinfo=timezone.utc)),
+            play_count=data['play_count'],
+            play_date=data['latest_play_date'].isoformat()))
         db_con.commit()
 
-    logger.info('Imported %s out of %s tracks', imported_count, loved_tracks_count)
+    logger.info('Import complete')
+    db_cursor.close()
     db_con.close()
 
 
