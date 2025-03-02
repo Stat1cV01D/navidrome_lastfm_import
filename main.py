@@ -13,6 +13,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Cache dictionary to store track IDs based on mbz_track_id or artist + track_name
+track_cache = {}
+
 
 def open_tracks(file_path: Path):
     with open(file_path, encoding='utf-8') as f:
@@ -41,6 +44,16 @@ def try_get_track_play_count_date(db_cursor: sqlite3.Cursor, track_id: str):
 
 
 def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id: str):
+    # Check cache first
+    if mbz_track_id and mbz_track_id in track_cache:
+        logger.debug('Found cached track ID for mbz_track_id "%s"', mbz_track_id)
+        return track_cache[mbz_track_id]
+
+    key = f"{artist.lower()} - {name.lower()}"
+    if key in track_cache:
+        logger.debug('Found cached track ID for artist + name "%s"', key)
+        return track_cache[key]
+
     def search_in_path(artist: str, name: str):
         def sanitized(name: str, replace: str):
             for c in r'\/:*?"<>|':
@@ -124,7 +137,14 @@ def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id
             if fetch is not None:
                 logger.debug('Found (attempt #%s) ["%s" by "%s"] as ["%s" by "%s"]',
                              n+1, name, artist, fetch[2], fetch[1])
-                return fetch[0]
+
+                # Cache the found track ID
+                track_id = fetch[0]
+                if mbz_track_id:
+                    track_cache[mbz_track_id] = track_id
+                track_cache[key] = track_id
+
+                return track_id
     except sqlite3.OperationalError as e:
         logger.error('Error finding ["%s" by "%s"]: %s', name, artist, str(e))
 
