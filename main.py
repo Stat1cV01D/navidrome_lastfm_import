@@ -12,8 +12,6 @@ from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(format='%(levelname)s: %(message)s', filename="output.log",
-                    encoding='utf-8', level=logging.DEBUG)
 
 
 def open_tracks(file_path: Path):
@@ -139,8 +137,12 @@ def main():
     parser.add_argument("--scrobbled-tracks-file", type=str, help="JSON with scrobbled tracks")
     parser.add_argument("--db", type=str, help="path to navidrome.db")
     parser.add_argument("--name", type=str, help="Navidrome user name")
+    parser.add_argument("--log-level", type=str, default="info",
+                        help="Log level (debug, info, warning, error, critical)")
     args = parser.parse_args()
 
+    logging.basicConfig(format='%(levelname)s: %(message)s', filename="output.log",
+                        encoding='utf-8', level=logging.getLevelNamesMapping().get(args.log_level.upper(), logging.INFO))
     db_con = sqlite3.connect(args.db)
     db_cursor = db_con.cursor()
     user_id = get_user_id(db_cursor, args.name)
