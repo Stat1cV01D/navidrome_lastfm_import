@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
-            "args": "--tracks-file=lovedtracks.json --db=navidrome.db --name=Stat1cV01D",
+            "args": "--loved-tracks-file=lovedtracks.json --scrobbled-tracks-file=scrobbles.json --db=navidrome.db --name=Stat1cV01D",
             "justMyCode": false
         }
     ]
