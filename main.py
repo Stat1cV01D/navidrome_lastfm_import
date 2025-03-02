@@ -104,10 +104,12 @@ def get_track_id(db_cursor: sqlite3.Cursor, artist: str, name: str, mbz_track_id
                     "name_w": f'{name}%w/%'})
 
     def search_several_artists_regex(artist: str, name: str):
-        delimiters = re.compile(r"(?:[\&\,]| x |ft|feat(?:uring)?| w\/ )", flags=re.IGNORECASE)
+        delimiters = re.compile(r"(?:[\&\,]| x |ft\.?|feat\.?(?:uring)?| w\/ )",
+                                flags=re.IGNORECASE)
         if not delimiters.search(artist + " - " + name):
             return None
-        key_words = [x.strip().strip("()[]").lower() for x in delimiters.split(artist + "," + name)]
+        key_words = [x.strip().strip("()[]").strip().lower()
+                     for x in delimiters.split(artist + "," + name)]
         template = ('SELECT mf.id, mf.artist, mf.title,'
                     ' LOWER(mf.artist || " " || mf.title) as search_string'
                     ' FROM media_file mf WHERE ({condition})')
